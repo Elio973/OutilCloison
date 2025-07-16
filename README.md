@@ -1,6 +1,6 @@
 # OutilCloison
 
-## 📐 Présentation
+## Présentation
 
 **OutilCloison** est un assistant d’aide de sélection de cloisons pour les logements.  
 L’application permet, à partir de fichiers Excel (réglementations, base produits) et d’un plan reconnu (tableau),  
