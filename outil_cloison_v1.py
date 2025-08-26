@@ -204,6 +204,13 @@ if uploaded_file:
     with colm4:
         if st.button("➕ Ajouter pièce"):
             st.session_state.pieces_man.append({"page": 0, "ligne": nom_manuel, "surface": surf_manuel, "hsp": hsp_manuel})
+            # 👉 si l’éditeur est déjà en place, on push aussi dans le DF des pièces
+            if "pieces_df" in st.session_state:
+                st.session_state.pieces_df = pd.concat(
+                    [st.session_state.pieces_df,
+                     pd.DataFrame([{"Nom": nom_manuel, "Surface_m2": surf_manuel, "HSP_m": hsp_manuel, "Page": 0}])],
+                    ignore_index=True
+                )
 
     # =========================
     # Table des pièces
@@ -218,14 +225,46 @@ if uploaded_file:
             "Page": p["page"]
         })
 
-    # 👉 Affichage de la table fusionnée (OCR + manuel)
-    st.subheader("📋 Pièces (OCR + ajouts)")
-    if table_out:
-        st.dataframe(pd.DataFrame(table_out), use_container_width=True)
-    else:
-        st.info("Ajoute au moins une pièce pour créer des séparations.")
+    # 👉 Initialisation ou maj du DF éditable en session (évite d’écraser tes modifs à chaque rerun)
+    current_upload_name = getattr(uploaded_file, "name", None)
+    if "pieces_df" not in st.session_state or st.session_state.get("last_upload_name") != current_upload_name:
+        st.session_state.pieces_df = pd.DataFrame(table_out)
+        st.session_state.last_upload_name = current_upload_name
 
-    noms = [p["Nom"] for p in table_out] if table_out else []
+    # 👉 Affichage/édition du tableau “Pièces (OCR + ajouts)”
+    st.subheader("📋 Pièces (OCR + ajouts)")
+    edited_df = st.data_editor(
+        st.session_state.pieces_df,
+        use_container_width=True,
+        num_rows="dynamic",  # ajoute des lignes directement depuis l’UI
+        key="pieces_editor",
+        column_config={
+            "Surface_m2": st.column_config.NumberColumn("Surface_m2", help="Surface en m²", step=0.1, format="%.2f"),
+            "HSP_m": st.column_config.NumberColumn("HSP_m", help="Hauteur sous plafond (m)", step=0.05, format="%.2f"),
+            "Page": st.column_config.NumberColumn("Page", min_value=0, step=1),
+        }
+    )
+
+    # 👉 Bouton pour appliquer les modifs (édition / ajout lignes)
+    if st.button("✅ Appliquer les modifications aux pièces"):
+        st.session_state.pieces_df = edited_df.reset_index(drop=True)
+        st.success("Modifications appliquées.")
+
+    # 👉 Sélection & suppression de lignes (solution simple et fiable)
+    if not st.session_state.pieces_df.empty:
+        options_to_delete = st.multiselect(
+            "🗑️ Sélectionne des lignes à supprimer",
+            options=st.session_state.pieces_df.index.tolist(),
+            format_func=lambda i: f"{st.session_state.pieces_df.loc[i, 'Nom']} (Page {st.session_state.pieces_df.loc[i, 'Page']})"
+        )
+        if st.button("Supprimer les lignes sélectionnées"):
+            st.session_state.pieces_df = st.session_state.pieces_df.drop(index=options_to_delete).reset_index(drop=True)
+            st.success(f"{len(options_to_delete)} ligne(s) supprimée(s).")
+
+    # 👉 La source de vérité pour la suite devient ce DF édité
+    table_for_use = st.session_state.pieces_df.copy()
+
+    noms = table_for_use["Nom"].dropna().tolist() if not table_for_use.empty else []
     st.header("✳️ Séparations entre pièces")
 
     if "separations" not in st.session_state:
@@ -282,8 +321,12 @@ if uploaded_file:
         # Table de détection
         df_detect = []
         for sep in st.session_state.separations:
-            p1_row = next((p for p in table_out if p["Nom"] == sep["Pièce 1"]), {})
-            p2_row = next((p for p in table_out if p["Nom"] == sep["Pièce 2"]), {})
+            # 👉 on récupère la 1ère occurrence par nom (si doublons, on prend la première)
+            p1_match = table_for_use[table_for_use["Nom"] == sep["Pièce 1"]]
+            p2_match = table_for_use[table_for_use["Nom"] == sep["Pièce 2"]]
+            p1_row = p1_match.iloc[0].to_dict() if not p1_match.empty else {}
+            p2_row = p2_match.iloc[0].to_dict() if not p2_match.empty else {}
+
             df_detect.append({
                 "Pièce 1": sep["Pièce 1"],
                 "Surface 1 (m²)": p1_row.get("Surface_m2", ""),
