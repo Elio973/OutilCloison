@@ -59,51 +59,21 @@ def chercher_exigence_acoustique(df, type1, type2):
 # =========================
 @st.cache_data
 def charger_fichiers():
-    """
-    Charge les 3 Excel depuis ./data/ si dispo, sinon depuis la racine.
-    Normalise les colonnes numériques.
-    """
-    # Cherche un dossier 'data' proche du script
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    data_dir = os.path.join(base_dir, "data")
-    root_dir = base_dir
-
-    def _read_xlsx(fname: str):
-        candidates = [
-            os.path.join(data_dir, fname),
-            os.path.join(root_dir, fname),
-        ]
-        for path in candidates:
-            if os.path.exists(path):
-                return pd.read_excel(path)
-        raise FileNotFoundError(f"Fichier introuvable : {fname} (cherché dans ./data et à la racine)")
-
-    df_acou = _read_xlsx("exigence_acoustique_logement.xlsx")
+    df_acou = pd.read_excel("exigence_acoustique_logement.xlsx")
     df_acou.columns = df_acou.columns.str.strip()
 
-    df_feu = _read_xlsx("exigence_coupe_feu_logement.xlsx")
+    df_feu = pd.read_excel("exigence_coupe_feu_logement.xlsx")
     df_feu.columns = df_feu.columns.str.strip()
 
-    df_cloisons = _read_xlsx("cloisons_siniat_nettoye.xlsx")
+    df_cloisons = pd.read_excel("cloisons_siniat_nettoye.xlsx")
     df_cloisons.columns = df_cloisons.columns.str.strip()
-    # Colonnes numériques robustes
-    if "Résistance feu (min)".lower() in [c.lower() for c in df_cloisons.columns]:
-        df_cloisons["Résistance feu (min)"] = pd.to_numeric(df_cloisons.filter(regex="(?i)^Résistance feu \(min\)$"), errors="coerce").squeeze()
-    else:
-        # fallback si le nom diffère
-        if "Résistance feu (min)" in df_cloisons.columns:
-            df_cloisons["Résistance feu (min)"] = pd.to_numeric(df_cloisons["Résistance feu (min)"], errors="coerce")
 
-    if "Rw+C avec isolant (dB)" in df_cloisons.columns:
-        df_cloisons["Rw+C avec isolant (dB)"] = pd.to_numeric(df_cloisons["Rw+C avec isolant (dB)"], errors="coerce")
+    # Conversion des colonnes utiles en numérique
+    df_cloisons["Résistance feu (min)"] = pd.to_numeric(df_cloisons["Résistance feu (min)"], errors="coerce")
+    df_cloisons["Rw+C avec isolant (dB)"] = pd.to_numeric(df_cloisons["Rw+C avec isolant (dB)"], errors="coerce")
 
     return df_acou, df_feu, df_cloisons
 
-try:
-    df_acou, df_feu, df_cloisons = charger_fichiers()
-except FileNotFoundError as e:
-    st.error(str(e))
-    st.stop()
 
 # =========================
 # Paramètres de bâtiment
