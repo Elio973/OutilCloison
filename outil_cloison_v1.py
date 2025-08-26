@@ -75,6 +75,13 @@ def charger_fichiers():
     return df_acou, df_feu, df_cloisons
 
 
+try:
+    df_acou, df_feu, df_cloisons = charger_fichiers()
+except FileNotFoundError as e:
+    st.error(str(e))
+    st.stop()
+
+
 # =========================
 # Paramètres de bâtiment
 # =========================
