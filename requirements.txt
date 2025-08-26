@@ -5,5 +5,3 @@ pillow
 pytesseract
 pymupdf
 numpy
-tesseract-ocr
-tesseract-ocr-fra
