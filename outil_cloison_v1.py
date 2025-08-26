@@ -266,7 +266,7 @@ if uploaded_file:
         # Export
         from io import BytesIO
         output = BytesIO()
-        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
             df_detect.to_excel(writer, index=False, sheet_name="Résultats")
         st.download_button(
             label="📥 Télécharger le fichier Excel final",
