@@ -159,7 +159,6 @@ except FileNotFoundError as e:
     st.stop()
 
 
-
 # =========================
 # Paramètres de bâtiment
 # =========================
@@ -171,10 +170,11 @@ type_batiment = st.selectbox(
 if type_batiment == "Logement":
     logement_type = st.radio("Type de logement :", ["Individuel", "Collectif"])
     mitoyennete = st.checkbox("Le logement est-il collé à un autre bâtiment (mitoyen ou ERP) ?")
-    famille = st.selectbox("Famille réglementaire :", ["1", "2"] if logement_type == "Individuel" else ["2", "3A", "3B", "4"])
+    famille = st.selectbox("Famille réglementaire :", ["1", "2"] if logement_type == "Individuel" else ["2", "3A", "3B", "4", "5"])
 else:
     famille = st.text_input("Famille réglementaire applicable (si connue)")
     mitoyennete = False  # 👉 évite les NameError si on n’est pas en 'Logement'
+
 
 # =========================
 # Uploader plan & OCR
@@ -210,11 +210,11 @@ if uploaded_file:
                 st.caption(f"Fichier : {uploaded_file.name} — {n_pages} page(s)")
 
             img_show, _ = _render_pdf_page(file_bytes, page_num - 1, zoom)
-            st.image(img_show, use_column_width=True)
+            st.image(img_show, use_container_width=True) 
 
         else:
             # image simple (PNG/JPG)
-            st.image(Image.open(io.BytesIO(file_bytes)), caption=uploaded_file.name, use_column_width=True)
+            st.image(Image.open(io.BytesIO(file_bytes)), caption=uploaded_file.name, use_container_width=True)
 
     except Exception as e:
         st.warning(f"Aperçu indisponible : {e}")
@@ -222,6 +222,9 @@ if uploaded_file:
     st.info("🔍 Traitement OCR en cours…")
 
     # --- OCR (réutilise file_bytes pour éviter de relire le buffer) ---
+    ocr_msg = st.empty()
+    ocr_msg.info("🔍 Traitement OCR en cours…")
+
     images = []
     try:
         if uploaded_file.type == "application/pdf":
@@ -235,8 +238,12 @@ if uploaded_file:
                 doc.close()
         else:
             images = [Image.open(io.BytesIO(file_bytes)).convert("RGB")]
+
+        # si on arrive ici sans exception : on remplace le message par un succès
+        ocr_msg.success(f"✅ OCR terminé : {len(images)} page(s) traitée(s).")
+
     except Exception as e:
-        st.error(f"Erreur lors de la lecture du fichier : {e}")
+        ocr_msg.error(f"❌ Erreur lors de la lecture/OCR du fichier : {e}")
         st.stop()
 
 
