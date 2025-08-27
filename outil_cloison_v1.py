@@ -1,6 +1,6 @@
-import os
-import io
-import re
+import os #biblio standard
+import io #flux de données
+import re #regex
 
 import streamlit as st
 import pandas as pd
@@ -11,7 +11,7 @@ from PIL import Image
 from utils_ocr import setup_tesseract, pick_lang
 
 # =========================
-# Config app & OCR portable
+# Configuration de l'app & OCR (tesseract) 
 # =========================
 st.set_page_config(page_title="🏗️ Assistant Cloison – Version Finale", layout="wide")
 
@@ -21,10 +21,10 @@ LANG_OCR = pick_lang("fra", "eng") # utilise FRA si dispo, sinon ENG
 st.title("🏗️ Assistant Cloison - Version Finale")
 
 # =========================
-# Listes & petits helpers
+# Listes pièces & autres fonctions
 # =========================
-piece_principale = ["séjour", "salon", "chambre", "salle à manger"]
-piece_service = ["cuisine", "entrée", "bureau", "sanitaire", "wc", "toilette", "salle de bain", "sdb", "salle d'eau", "sde", "buanderie"]
+piece_principale = ["séjour", "salon", "chambre", "salle à manger", "chambre à coucher"]
+piece_service = ["cuisine", "Cuisine", "entrée", "bureau", "sanitaire", "wc", "toilette", "salle de bain", "sdb", "salle d'eau", "sde", "buanderie"]
 circulation = ["circulation", "dégagement"]
 # liste des pièces à implémenter (on pourrait traduire en anglais aussi)
 
@@ -55,41 +55,69 @@ def chercher_exigence_acoustique(df, type1, type2):
         return ligne.iloc[0]["DnT,A [dB]"]
     return None
 
-# 👉 Règles “contexte de séparation” (entre logements / circulation / interne)
+# Règles “contexte de séparation” (entre logements / circulation / interne)
 def exigence_acoustique_contexte(type1: str, type2: str, contexte: str, df_acou: pd.DataFrame):
     """Retourne l’exigence DnT,A en dB selon le contexte réglementaire."""
     if contexte == "Entre logements":
-        return 53.0  # arrêté logements : isolement minimal entre logements
+        return 53.0  # isolement minimal entre logements
     if contexte == "Logement ↔ circulation commune":
-        return 30.0  # seuil minimal logements-circulations
-    # sinon, cas “interne au logement” : on garde le tableau df_acou (logique existante)
+        return 30.0  # isolement minimal logements-circulations
+    # sinon, cas “interne au logement” : on garde le tableau df_acou 
     return chercher_exigence_acoustique(df_acou, type1, type2)
 
-def exigence_feu_contexte(contexte: str, famille: str, mitoyennete: bool):
+def exigence_feu_contexte(contexte: str, famille: str, mitoyennete: bool = False):
     """
     Retourne ((libellé_EI, minutes), note) ou (None, None) si pas d’exigence applicable.
-    Règles fournies par toi :
-      - Cat. 1 & 2 : EI 15 (sauf cat.2 si mitoyenneté — cas particulier à confirmer)
-      - Cat. 3A/3B : EI 30
-      - Cat. 4     : EI 60
-      - Cat. 5     : EI 120 (+ protection structurelle)
+
+    Règles principales :
+      - Entre logements :
+          Cat. 1 : EI 15
+          Cat. 2 : EI 60 (mitoyen par définition)
+          Cat. 3A/3B : EI 30
+          Cat. 4 : EI 60
+          Cat. 5 : EI 120 (+ protection structurelle)
+      - Circulations :
+          Cat. 1/2 : aucune exigence
+          Cat. 3A/3B : cloisonnement pas toujours requis (EI 30 conseillé si cloisonné)
+          Cat. 4 : cloisonnement obligatoire dès R+4 (EI 60)
+          Cat. 5 : cloisonnement obligatoire avec compartimentage (EI 120)
     """
-    if contexte != "Entre logements":
-        return (None, None), None  # pas d’exigence feu pour interne/circulations
     fam = str(famille).upper()
     note = None
-    if fam in ["1", "2"]:
-        if fam == "2" and mitoyennete:
-            note = "Cas particulier: catégorie 2 mitoyenne — vérifier l’exigence locale."
-        return ("EI 15", 15), note
-    if fam in ["3A", "3B"]:
-        return ("EI 30", 30), note
-    if fam == "4":
-        return ("EI 60", 60), note
-    if fam == "5":
-        return ("EI 120", 120), note
-    # par défaut (famille inconnue)
+
+    # === Cas 1 : cloisons entre logements ===
+    if contexte == "Entre logements":
+        if fam == "1":
+            return ("EI 15", 15), note
+        if fam == "2":
+            note = "Catégorie 2 mitoyenne : cloison séparative EI 60."
+            return ("EI 60", 60), note
+        if fam in ["3A", "3B"]:
+            return ("EI 30", 30), note
+        if fam == "4":
+            return ("EI 60", 60), note
+        if fam == "5":
+            return ("EI 120", 120), "Exigence renforcée : protection structurelle complémentaire."
+        return (None, None), note
+
+    # === Cas 2 : cloisonnement des circulations ===
+    if contexte == "Circulation":
+        if fam in ["1", "2"]:
+            return (None, None), "Pas d’exigence pour les circulations en maison individuelle."
+        if fam in ["3A", "3B"]:
+            return ("EI 30", 30), "Cloisonnement pas toujours requis (à vérifier selon configuration)."
+        if fam == "4":
+            return ("EI 60", 60), "Cloisonnement obligatoire dès R+4."
+        if fam == "5":
+            return ("EI 120", 120), "Cloisonnement obligatoire avec compartimentage."
+        return (None, None), note
+
+    # Par défaut : pas d’exigence connue
     return (None, None), note
+
+# au début j'ai fait avec un tableau excel (solution lourde)
+# sinon on peut passer par une fonction Dict pour que ce sois plus lisible 
+
 
 # =========================
 # Chargement des fichiers
@@ -181,7 +209,7 @@ if uploaded_file:
                 hsp = h.group(1).replace(",", ".") if h else ""
                 pieces.append({"page": idx+1, "ligne": line.strip(), "surface": surface, "hsp": hsp})
 
-    # 👉 Aperçu des pièces détectées automatiquement (utile pour contrôle visuel)
+    # Aperçu des pièces détectées automatiquement (utile pour contrôle visuel rapide)
     if pieces:
         st.subheader("🧭 Pièces détectées par l’OCR (aperçu)")
         st.dataframe(pd.DataFrame(pieces), use_container_width=True)
@@ -189,7 +217,7 @@ if uploaded_file:
         st.info("Aucune pièce détectée automatiquement. Tu peux en ajouter manuellement ci-dessous.")
 
     # =========================
-    # Ajouts manuels utilisateur
+    # Ajouts manuels des pièces par utilisateur
     # =========================
     if "pieces_man" not in st.session_state:
         st.session_state.pieces_man = []
@@ -204,7 +232,7 @@ if uploaded_file:
     with colm4:
         if st.button("➕ Ajouter pièce"):
             st.session_state.pieces_man.append({"page": 0, "ligne": nom_manuel, "surface": surf_manuel, "hsp": hsp_manuel})
-            # 👉 si l’éditeur est déjà en place, on push aussi dans le DF des pièces
+            # si l’éditeur est déjà en place, on met aussi dans le DF des pièces
             if "pieces_df" in st.session_state:
                 st.session_state.pieces_df = pd.concat(
                     [st.session_state.pieces_df,
@@ -225,13 +253,13 @@ if uploaded_file:
             "Page": p["page"]
         })
 
-    # 👉 Initialisation ou maj du DF éditable en session (évite d’écraser tes modifs à chaque rerun)
+    # Initialisation ou maj du DF éditable en session (évite d’écraser tes modifs à chaque rerun)
     current_upload_name = getattr(uploaded_file, "name", None)
     if "pieces_df" not in st.session_state or st.session_state.get("last_upload_name") != current_upload_name:
         st.session_state.pieces_df = pd.DataFrame(table_out)
         st.session_state.last_upload_name = current_upload_name
 
-    # 👉 Affichage/édition du tableau “Pièces (OCR + ajouts)”
+    # Affichage/édition du tableau “Pièces (OCR + ajouts)”
     st.subheader("📋 Pièces (OCR + ajouts)")
     edited_df = st.data_editor(
         st.session_state.pieces_df,
@@ -245,12 +273,12 @@ if uploaded_file:
         }
     )
 
-    # 👉 Bouton pour appliquer les modifs (édition / ajout lignes)
+    # Bouton pour appliquer les modifs (édition / ajout lignes)
     if st.button("✅ Appliquer les modifications aux pièces"):
         st.session_state.pieces_df = edited_df.reset_index(drop=True)
         st.success("Modifications appliquées.")
 
-    # 👉 Sélection & suppression de lignes (solution simple et fiable)
+    # Sélection & suppression de lignes 
     if not st.session_state.pieces_df.empty:
         options_to_delete = st.multiselect(
             "🗑️ Sélectionne des lignes à supprimer",
@@ -261,7 +289,7 @@ if uploaded_file:
             st.session_state.pieces_df = st.session_state.pieces_df.drop(index=options_to_delete).reset_index(drop=True)
             st.success(f"{len(options_to_delete)} ligne(s) supprimée(s).")
 
-    # 👉 La source de vérité pour la suite devient ce DF édité
+    
     table_for_use = st.session_state.pieces_df.copy()
 
     noms = table_for_use["Nom"].dropna().tolist() if not table_for_use.empty else []
@@ -270,7 +298,7 @@ if uploaded_file:
     if "separations" not in st.session_state:
         st.session_state.separations = []
 
-    # 👉 Ajout du “Contexte de séparation” (3 catégories demandées)
+    # Ajout du “Contexte de séparation” 
     CONTEXT_OPTIONS = ["Interne au logement", "Entre logements", "Logement ↔ circulation commune"]
 
     col1, col2 = st.columns(2)
@@ -298,7 +326,7 @@ if uploaded_file:
 
     if st.session_state.separations:
         df_sep = pd.DataFrame(st.session_state.separations)
-        # 👉 Éditeur avec Selectbox sur “Contexte” pour corriger après coup
+        # Éditeur avec Selectbox sur “Contexte” pour corriger après coup
         st.data_editor(
             df_sep,
             use_container_width=True,
@@ -321,7 +349,7 @@ if uploaded_file:
         # Table de détection
         df_detect = []
         for sep in st.session_state.separations:
-            # 👉 on récupère la 1ère occurrence par nom (si doublons, on prend la première)
+            # on récupère la 1ère occurrence par nom (si doublons, on prend la première)
             p1_match = table_for_use[table_for_use["Nom"] == sep["Pièce 1"]]
             p2_match = table_for_use[table_for_use["Nom"] == sep["Pièce 2"]]
             p1_row = p1_match.iloc[0].to_dict() if not p1_match.empty else {}
@@ -343,13 +371,13 @@ if uploaded_file:
         df_detect["Type Pièce 1"] = df_detect["Pièce 1"].apply(classer_piece)
         df_detect["Type Pièce 2"] = df_detect["Pièce 2"].apply(classer_piece)
 
-        # 👉 Exigences acoustiques selon le contexte (53 / 30 / tableau)
+        # Exigences acoustiques selon le contexte (53 / 30 / tableau)
         df_detect["Exigence DnT,A (dB)"] = df_detect.apply(
             lambda row: exigence_acoustique_contexte(row["Type Pièce 1"], row["Type Pièce 2"], row["Contexte"], df_acou),
             axis=1
         )
 
-        # 👉 Exigences feu : seulement “Entre logements”
+        # Exigences feu : seulement “Entre logements”
         feu_info = df_detect.apply(
             lambda row: exigence_feu_contexte(row["Contexte"], famille, mitoyennete),
             axis=1
@@ -361,7 +389,7 @@ if uploaded_file:
 
         # Filtrage cloisons compatibles
         def filtrer(row):
-            # 👉 on n’impose un critère que s’il est défini (évite de filtrer à tort)
+            # on n’impose un critère que s’il est défini (évite de filtrer à tort)
             mask = pd.Series(True, index=df_cloisons.index)
             if pd.notna(row["Exigence DnT,A (dB)"]):
                 try:
@@ -378,7 +406,7 @@ if uploaded_file:
 
         df_detect["Cloisons compatibles"] = df_detect.apply(filtrer, axis=1)
 
-        # Estimation simple de plaques (BA18 supposé, 0.9 x 2.6 m -> ~2.34 m²)
+        # Estimation simple de plaques (BA supposé, 0.9 x 2.6 m -> ~2.34 m²)
         def calculer_nombre_plaques(row):
             try:
                 long_m = float(str(row["Longueur cloison (m)"]).replace(",", "."))
@@ -388,7 +416,7 @@ if uploaded_file:
             except Exception:
                 return None
 
-        df_detect["Plaques BA18 à commander"] = df_detect.apply(calculer_nombre_plaques, axis=1)
+        df_detect["Plaques BA à commander"] = df_detect.apply(calculer_nombre_plaques, axis=1)
 
         # Résultats
         st.subheader("📊 Résultat de l'analyse")
