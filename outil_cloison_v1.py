@@ -173,7 +173,7 @@ if type_batiment == "Logement":
     famille = st.selectbox("Famille réglementaire :", ["1", "2"] if logement_type == "Individuel" else ["2", "3A", "3B", "4", "5"])
 else:
     famille = st.text_input("Famille réglementaire applicable (si connue)")
-    mitoyennete = False  # 👉 évite les NameError si on n’est pas en 'Logement'
+    mitoyennete = False  # évite les NameError si on n’est pas en 'Logement'
 
 
 # =========================
