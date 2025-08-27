@@ -56,6 +56,7 @@ def chercher_exigence_acoustique(df, type1, type2):
     return None
 
 # Règles “contexte de séparation” (entre logements / circulation / interne)
+
 def exigence_acoustique_contexte(type1: str, type2: str, contexte: str, df_acou: pd.DataFrame):
     """Retourne l’exigence DnT,A en dB selon le contexte réglementaire."""
     if contexte == "Entre logements":
@@ -64,6 +65,7 @@ def exigence_acoustique_contexte(type1: str, type2: str, contexte: str, df_acou:
         return 30.0  # isolement minimal logements-circulations
     # sinon, cas “interne au logement” : on garde le tableau df_acou 
     return chercher_exigence_acoustique(df_acou, type1, type2)
+
 
 def exigence_feu_contexte(contexte: str, famille: str, mitoyennete: bool = False):
     """
@@ -85,8 +87,17 @@ def exigence_feu_contexte(contexte: str, famille: str, mitoyennete: bool = False
     fam = str(famille).upper()
     note = None
 
+    # normalisation simple du libellé de contexte
+    ctx = str(contexte).strip().lower()
+    is_circulation = ctx in {
+        "circulation",
+        "logement ↔ circulation commune",
+        "logement <-> circulation commune",
+        "logement - circulation commune"
+    }
+
     # === Cas 1 : cloisons entre logements ===
-    if contexte == "Entre logements":
+    if ctx == "entre logements":
         if fam == "1":
             return ("EI 15", 15), note
         if fam == "2":
@@ -101,7 +112,7 @@ def exigence_feu_contexte(contexte: str, famille: str, mitoyennete: bool = False
         return (None, None), note
 
     # === Cas 2 : cloisonnement des circulations ===
-    if contexte == "Circulation":
+    if is_circulation:
         if fam in ["1", "2"]:
             return (None, None), "Pas d’exigence pour les circulations en maison individuelle."
         if fam in ["3A", "3B"]:
@@ -112,8 +123,9 @@ def exigence_feu_contexte(contexte: str, famille: str, mitoyennete: bool = False
             return ("EI 120", 120), "Cloisonnement obligatoire avec compartimentage."
         return (None, None), note
 
-    # Par défaut : pas d’exigence connue
+    # Par défaut : pas d’exigence connue (interne au logement, etc.)
     return (None, None), note
+
 
 # au début j'ai fait avec un tableau excel (solution lourde)
 # sinon on peut passer par une fonction Dict pour que ce sois plus lisible 
@@ -147,6 +159,7 @@ except FileNotFoundError as e:
     st.stop()
 
 
+
 # =========================
 # Paramètres de bâtiment
 # =========================
@@ -169,13 +182,50 @@ else:
 uploaded_file = st.file_uploader("📥 Uploader un plan (PDF ou image)", type=["pdf", "png", "jpg", "jpeg"])
 
 if uploaded_file:
+    #  Aperçu immédiat du plan (PDF multi-pages ou image)
+    st.subheader("Aperçu du plan")
+    file_bytes = uploaded_file.getvalue()  # on lit une fois et on réutilise
+
+    try:
+        if uploaded_file.type == "application/pdf":
+            # rendu d'une page PDF en image (avec zoom)
+            def _render_pdf_page(pdf_bytes: bytes, page_index: int = 0, zoom: float = 1.25):
+                doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                try:
+                    page_index = max(0, min(page_index, len(doc) - 1))
+                    page = doc.load_page(page_index)
+                    pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+                    img_bytes = pix.tobytes("png")
+                    return Image.open(io.BytesIO(img_bytes)), len(doc)
+                finally:
+                    doc.close()
+
+            # première passe pour connaître le nb de pages
+            img0, n_pages = _render_pdf_page(file_bytes, 0, 1.0)
+            c1, c2 = st.columns([1, 3])
+            with c1:
+                zoom = st.slider("Zoom", 0.6, 2.0, 1.25, 0.05)
+                page_num = st.number_input("Page", min_value=1, max_value=n_pages, value=1, step=1)
+            with c2:
+                st.caption(f"Fichier : {uploaded_file.name} — {n_pages} page(s)")
+
+            img_show, _ = _render_pdf_page(file_bytes, page_num - 1, zoom)
+            st.image(img_show, use_column_width=True)
+
+        else:
+            # image simple (PNG/JPG)
+            st.image(Image.open(io.BytesIO(file_bytes)), caption=uploaded_file.name, use_column_width=True)
+
+    except Exception as e:
+        st.warning(f"Aperçu indisponible : {e}")
+
     st.info("🔍 Traitement OCR en cours…")
 
+    # --- OCR (réutilise file_bytes pour éviter de relire le buffer) ---
     images = []
     try:
         if uploaded_file.type == "application/pdf":
-            pdf_bytes = uploaded_file.read()
-            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
             try:
                 for page in doc:
                     pix = page.get_pixmap(dpi=300)
@@ -184,10 +234,11 @@ if uploaded_file:
             finally:
                 doc.close()
         else:
-            images = [Image.open(uploaded_file).convert("RGB")]
+            images = [Image.open(io.BytesIO(file_bytes)).convert("RGB")]
     except Exception as e:
         st.error(f"Erreur lors de la lecture du fichier : {e}")
         st.stop()
+
 
     pieces = []
     keywords = ["Bureau", "Salle", "Local", "Chambre", "Cuisine", "Entrée", "Sanitaires", "WC", "Open space", "Local technique", "Salon"]
